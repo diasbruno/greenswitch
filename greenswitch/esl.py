@@ -8,6 +8,7 @@ import logging
 import pprint
 from six.moves.urllib.parse import unquote
 
+EOL = '\n'
 
 class NotConnectedError(Exception):
     pass
@@ -35,13 +36,12 @@ class ESLEvent(object):
 
 
 class InboundESL(object):
-    def __init__(self, host, port, password):
+    def __init__(self, host, port, password, timeout=5, auto_start=True):
         self.host = host
         self.port = port
         self.password = password
-        self.timeout = 5
-        self._run = True
-        self._EOL = '\n'
+        self.timeout = timeout
+        self._run = auto_start
         self._commands_sent = []
         self._auth_request_event = Event()
         self._receive_events_greenlet = None
@@ -53,6 +53,7 @@ class InboundESL(object):
         self._process_esl_event_queue = True
 
     def connect(self):
+        self._run = True
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(self.timeout)
         self.sock.connect((self.host, self.port))
@@ -83,7 +84,7 @@ class InboundESL(object):
                     self.connected = False
                 break
             # Empty line
-            if data == self._EOL:
+            if data == EOL:
                 event = ESLEvent(buf)
                 buf = ''
                 self.handle_event(event)
@@ -179,7 +180,7 @@ class InboundESL(object):
             raise NotConnectedError()
         async_response = gevent.event.AsyncResult()
         self._commands_sent.append(async_response)
-        raw_msg = (data + self._EOL*2).encode('utf-8')
+        raw_msg = (data + EOL*2).encode('utf-8')
         self.sock.send(raw_msg)
         response = async_response.get()
         return response
@@ -187,6 +188,7 @@ class InboundESL(object):
     def authenticate(self):
         response = self.send('auth %s' % self.password)
         if response.headers['Reply-Text'] != '+OK accepted':
+            self.stop()
             raise ValueError('Invalid password.')
 
     def register_handle(self, name, handler):
